@@ -1,0 +1,17 @@
+pyproject.toml
+app/__init__.py
+app/config.py
+app/main.py
+app/schemas.py
+app/routers/__init__.py
+app/routers/health.py
+app/routers/opportunities.py
+app/services/__init__.py
+app/services/filters.py
+app/services/repository.py
+app/services/scoring.py
+gemma_immo_api.egg-info/PKG-INFO
+gemma_immo_api.egg-info/SOURCES.txt
+gemma_immo_api.egg-info/dependency_links.txt
+gemma_immo_api.egg-info/requires.txt
+gemma_immo_api.egg-info/top_level.txt

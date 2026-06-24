@@ -40,6 +40,8 @@ def build_opportunities(ads_df: pd.DataFrame, prices_df: pd.DataFrame) -> pd.Dat
         "Loyer_Maison_m2",
     ]
     for column in price_columns:
+        if column not in prices.columns:
+            prices[column] = None
         prices[column] = prices[column].apply(clean_number)
 
     prices["Ville"] = prices["Ville"].astype(str).str.casefold().str.strip()
@@ -91,4 +93,3 @@ def build_opportunities(ads_df: pd.DataFrame, prices_df: pd.DataFrame) -> pd.Dat
         )
 
     return pd.DataFrame(results)
-
