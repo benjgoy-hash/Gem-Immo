@@ -1,0 +1,10 @@
+services:
+  api:
+    build:
+      context: ./apps/api
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/api/app/data:/app/app/data
+
