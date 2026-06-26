@@ -442,8 +442,8 @@ Notes :
     )
     parser.add_argument(
         "--annees",
-        default="2020,2021,2022,2023,2024",
-        help="Années séparées par virgules (défaut: 2020-2024)",
+        default="2020,2021,2022,2023,2024,2025,2026",
+        help="Années séparées par virgules (défaut: 2020-2026)",
     )
     parser.add_argument(
         "--output",
