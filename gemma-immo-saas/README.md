@@ -1,100 +1,192 @@
 # Gemma Immo SaaS
 
-Gemma Immo SaaS transforme ton pipeline local `scraping -> resultats.csv -> filtrage IA Telegram` en application web.
+Pipeline d'analyse immobilière qui compare les annonces Bien'ici avec les prix de marché réels issus des données DVF (Demandes de Valeurs Foncières, DGFiP).
 
-Le projet contient :
-
-- une API FastAPI qui expose les opportunites immobilieres filtrees ;
-- un moteur Python reutilisable pour recalculer les decotes et rendements ;
-- une interface Next.js pour rechercher les biens par budget, type, ville et rendement ;
-- une structure prete pour ajouter comptes utilisateurs, abonnements, base de donnees et jobs planifies.
+---
 
 ## Architecture
 
-```text
-gemma-immo-saas/
-  apps/
-    api/                 API FastAPI + moteur metier Python
-      app/
-        data/            CSV de reference et resultats
-        routers/         Routes HTTP
-        services/        Calculs, chargement CSV, filtres
-      scripts/           Scripts batch pour regenerer resultats.csv
-    web/                 Frontend Next.js
-  docs/
-    ROADMAP_SAAS.md      Etapes pour passer du prototype au SaaS
 ```
+gemma-immo-saas/
+├── apps/
+│   ├── api/                          API FastAPI + moteur d'analyse
+│   │   ├── app/
+│   │   │   ├── data/
+│   │   │   │   ├── bienici.csv           Export Bien'ici (à fournir)
+│   │   │   │   ├── prix_immo.csv         Prix de référence statiques
+│   │   │   │   ├── dvf_haute_garonne.csv Prix DVF générés (gitignored)
+│   │   │   │   └── resultats.csv         Opportunités calculées (gitignored)
+│   │   │   ├── routers/
+│   │   │   ├── services/
+│   │   │   │   ├── dvf_market.py         Calcul des prix depuis DVF via API cquest
+│   │   │   │   └── scoring.py            Calcul décotes et rendements
+│   │   │   └── main.py
+│   │   └── scripts/
+│   │       └── run_analysis.py           Script principal d'analyse
+│   └── web/                          Frontend Next.js
+├── scrape_dvf_haute_garonne.py       Génère dvf_haute_garonne.csv (ce repo)
+└── docs/
+    └── ROADMAP_SAAS.md
+```
+
+---
+
+## Installation
+
+```bash
+cd apps/api
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1   # Windows
+# source .venv/bin/activate    # Linux/macOS
+pip install -e .
+```
+
+---
 
 ## Lancer l'API
 
-```powershell
-cd C:\Users\benjg\OneDrive\Bureau\DEV\Gemma\gemma-immo-saas\apps\api
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e .
+```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-Endpoints utiles :
+Endpoints :
 
-- `GET http://localhost:8000/health`
-- `GET http://localhost:8000/opportunities`
-- `GET http://localhost:8000/opportunities?max_price=100000&property_type=Appartement`
+- `GET /health`
+- `GET /opportunities`
+- `GET /opportunities?max_price=200000&property_type=Appartement&min_discount_percent=15`
 
-## Lancer le web
+---
 
-```powershell
-cd C:\Users\benjg\OneDrive\Bureau\DEV\Gemma\gemma-immo-saas\apps\web
+## Générer les données DVF
+
+`scrape_dvf_haute_garonne.py` interroge les données DVF pour la Haute-Garonne et produit un fichier de prix médians par ville, au même format que `prix_immo.csv`. Ce fichier peut ensuite être passé directement à `run_analysis.py` via `--prices`.
+
+### Source des données DVF
+
+| Source | URL |
+|--------|-----|
+| API cquest | `https://api.cquest.org/dvf` (doc : [github.com/cquest/dvf_as_api](https://github.com/cquest/dvf_as_api)) |
+| CSV officiels | `https://files.data.gouv.fr/geo-dvf/latest/csv/{annee}/departements/31.csv.gz` |
+
+Le mode `csv` est recommandé : il ne dépend pas de la disponibilité de l'API tierce et couvre l'ensemble des communes du département.
+
+### Mode CSV (recommandé)
+
+Télécharge les fichiers DVF officiels depuis data.gouv.fr et calcule les médianes de prix par ville et type de bien.
+
+```bash
+python scrape_dvf_haute_garonne.py --mode csv --annees 2022,2023,2024
+```
+
+Les fichiers `.gz` sont mis en cache dans `.dvf_cache/` pour éviter de les retélécharger.
+
+Écriture directement dans le répertoire data de l'API :
+
+```bash
+python scrape_dvf_haute_garonne.py --mode csv --output apps/api/app/data/dvf_haute_garonne.csv
+```
+
+### Mode API
+
+Interroge `api.cquest.org/dvf` pour chaque ville connue de Haute-Garonne. Utile pour un rafraîchissement ciblé sur quelques communes.
+
+```bash
+python scrape_dvf_haute_garonne.py --mode api
+```
+
+### Téléchargement manuel
+
+Si le téléchargement automatique échoue (réseau restreint, proxy) :
+
+```
+https://files.data.gouv.fr/geo-dvf/latest/csv/2024/departements/31.csv.gz
+https://files.data.gouv.fr/geo-dvf/latest/csv/2023/departements/31.csv.gz
+https://files.data.gouv.fr/geo-dvf/latest/csv/2022/departements/31.csv.gz
+```
+
+Placer les fichiers dans `.dvf_cache/` sous la forme `31_{annee}.csv.gz`, puis relancer le script.
+
+### Format de sortie `dvf_haute_garonne.csv`
+
+Identique à `prix_immo.csv` — directement utilisable via `--prices` :
+
+```
+Ville,Prix_Appartement_m2,Prix_Maison_m2,Loyer_Appartement_m2,Loyer_Maison_m2
+Toulouse,3462,4091,,
+Muret,2708,2857,,
+Blagnac,3104,3945,,
+```
+
+Les colonnes `Loyer_*` restent vides (données non disponibles dans DVF) — `run_analysis.py` se rabat sur `prix_immo.csv` pour les loyers si nécessaire.
+
+---
+
+## Lancer l'analyse
+
+```bash
+cd apps/api
+
+# Avec les prix DVF générés :
+python scripts/run_analysis.py \
+    --ads app/data/bienici.csv \
+    --prices app/data/dvf_haute_garonne.csv \
+    --output app/data/resultats.csv
+
+# Avec les prix statiques (fallback) :
+python scripts/run_analysis.py \
+    --ads app/data/bienici.csv \
+    --prices app/data/prix_immo.csv \
+    --output app/data/resultats.csv
+
+# Mode hybride — DVF avec fallback CSV si l'API cquest est inaccessible :
+python scripts/run_analysis.py \
+    --ads app/data/bienici.csv \
+    --market-source auto \
+    --dvf-cache app/data/market_prices_dvf.csv \
+    --output app/data/resultats.csv
+```
+
+`resultats.csv` est ensuite lu automatiquement par l'API. Si le fichier est absent, l'API utilise `resultats.sample.csv`.
+
+---
+
+## Format du CSV Bien'ici
+
+`bienici.csv` est un export direct depuis Bien'ici. Les colonnes exploitées par `scoring.py` :
+
+| Colonne | Valeurs attendues |
+|---------|-------------------|
+| `city` | Nom de la ville |
+| `postal_code` | Code postal |
+| `property_type` | `flat` ou `house` |
+| `price` | Prix en euros |
+| `surfaceArea` | Surface en m² |
+| `url` | URL de l'annonce |
+
+---
+
+## Lancer le frontend
+
+```bash
+cd apps/web
 npm install
 npm run dev
 ```
 
-Puis ouvre `http://localhost:3000`.
+Accessible sur `http://localhost:3000`.
 
-## Regenerer les resultats
+---
 
-Place un export Bien'ici dans `apps/api/app/data/bienici.csv`, puis lance :
+## Changelog
 
-```powershell
-cd C:\Users\benjg\OneDrive\Bureau\DEV\Gemma\gemma-immo-saas\apps\api
-python scripts/run_analysis.py --ads app/data/bienici.csv --prices app/data/prix_immo.csv --output app/data/resultats.csv
-```
+Voir [`update.md`](./update.md) pour l'historique des suppressions et changements cassants.
 
-Le SaaS lit `resultats.csv` si present, sinon il utilise `resultats.sample.csv`.
+### v2.0.0 — 2026-06-29
 
-## Publication GitHub
-
-Je n'ai pas pu creer le repo GitHub automatiquement depuis cette machine car la CLI `gh` n'est pas installee et le connecteur disponible ne propose pas la creation de repository. Pour publier :
-
-```powershell
-cd C:\Users\benjg\OneDrive\Bureau\DEV\Gemma\gemma-immo-saas
-git init
-git add .
-git commit -m "Initial SaaS scaffold"
-```
-
-Ensuite, cree un repo vide sur GitHub, par exemple `gemma-immo-saas`, puis :
-
-```powershell
-git branch -M main
-git remote add origin https://github.com/<ton-user>/gemma-immo-saas.git
-git push -u origin main
-```
-
-Si tu installes GitHub CLI :
-
-```powershell
-winget install GitHub.cli
-gh auth login
-gh repo create gemma-immo-saas --private --source . --remote origin --push
-```
-
-## Prochaines briques SaaS
-
-1. Stocker les annonces dans PostgreSQL au lieu d'un CSV.
-2. Lancer le scraping en job planifie avec historique des annonces.
-3. Ajouter authentification, espaces utilisateurs et favoris.
-4. Brancher Stripe pour les plans payants.
-5. Ajouter le connecteur IA Gemma pour requetes en langage naturel.
-6. Deployer API + worker sur Render/Railway/Fly, front sur Vercel.
-
+- Refonte complète de `scrape_dvf_haute_garonne.py` :
+  - Mode `csv` : téléchargement des fichiers DVF officiels data.gouv.fr (dept 31), calcul des médianes, mise en cache locale
+  - Mode `api` : interrogation de `api.cquest.org/dvf` commune par commune avec résolution INSEE via `geo.api.gouv.fr`
+  - Sortie au format `prix_immo.csv` — compatible directement avec `--prices` de `run_analysis.py`
+  - Aucune dépendance tierce requise (stdlib uniquement)
+- Suppression des scripts de scraping précédents (voir `update.md`)
+- Nettoyage du README
