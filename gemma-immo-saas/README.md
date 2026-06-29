@@ -124,7 +124,7 @@ Les colonnes `Loyer_*` restent vides (données non disponibles dans DVF) — `ru
 ## Lancer l'analyse
 
 ```bash
-cd apps/api
+cd apps/api/scripts
 
 # Avec les prix DVF générés :
 python scripts/run_analysis.py \
