@@ -1,7 +1,10 @@
 import argparse
+import sys
 from pathlib import Path
 
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.services.dvf_market import DvfMarketError, build_market_prices_from_dvf
 from app.services.scoring import build_opportunities
@@ -47,8 +50,26 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    ads_df = pd.read_csv(args.ads, encoding="utf-8-sig")
-    fallback_prices_df = pd.read_csv(args.prices, encoding="ISO-8859-1") if args.prices.exists() else None
+    
+    # Autodétection du séparateur pour bienici.csv
+    ads_df = pd.read_csv(args.ads, encoding="utf-8-sig", sep=None, engine="python")
+    
+    fallback_prices_df = None
+    if args.prices.exists():
+        # Autodétection du séparateur pour le CSV des prix (gère les virgules, points-virgules, pipes...)
+        fallback_prices_df = pd.read_csv(args.prices, encoding="utf-8-sig", sep=None, engine="python")
+        
+        # Nettoyage des espaces potentiels dans les noms de colonnes
+        fallback_prices_df.columns = fallback_prices_df.columns.str.strip()
+        
+        # Mapping automatique : si le CSV contient "Commune" ou "commune", on le renomme en "Ville"
+        if "Ville" not in fallback_prices_df.columns:
+            if "Commune" in fallback_prices_df.columns:
+                fallback_prices_df.rename(columns={"Commune": "Ville"}, inplace=True)
+            elif "commune" in fallback_prices_df.columns:
+                fallback_prices_df.rename(columns={"commune": "Ville"}, inplace=True)
+            else:
+                print(f"⚠️ Attention : Le fichier {args.prices} ne contient ni 'Ville' ni 'Commune'. Colonnes trouvées : {list(fallback_prices_df.columns)}")
 
     if args.market_source == "csv":
         if fallback_prices_df is None:
@@ -69,6 +90,10 @@ def main() -> None:
                 raise
             print(f"DVF indisponible ({exc}). Fallback vers {args.prices}.")
             prices_df = fallback_prices_df
+
+    # Sécurité finale avant d'envoyer au scoring
+    if "Ville" not in prices_df.columns:
+        raise KeyError(f"Impossible de lancer le scoring : la colonne 'Ville' est manquante dans les prix. Colonnes disponibles : {list(prices_df.columns)}")
 
     result_df = build_opportunities(ads_df, prices_df)
     args.output.parent.mkdir(parents=True, exist_ok=True)
